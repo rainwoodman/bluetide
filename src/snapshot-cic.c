@@ -14,7 +14,7 @@ static void cicadd(CIC * cic, BigFile * bf, char * blockname, char * mblockname)
 
     if(0 != big_file_mpi_open_block(bf, &bb, blockname, MPI_COMM_WORLD)) {
         fprintf(stderr, "failed to open %s: %s\n", blockname, big_file_get_error_message()); 
-        exit(1);
+        return;
     } 
     if(0 != big_file_mpi_open_block(bf, &mbb, mblockname, MPI_COMM_WORLD)) {
         fprintf(stderr, "failed to open %s: %s\n", mblockname, big_file_get_error_message()); 
@@ -27,17 +27,17 @@ static void cicadd(CIC * cic, BigFile * bf, char * blockname, char * mblockname)
     size_t chunksize = 1024 * 1024 * 128;
     while(offset < end) {
         if(0 != big_block_read_simple(&bb, offset, chunksize, &array, "f8")) {
-            fprintf(stderr, "failed to read: %s\n", blockname, big_file_get_error_message());
+            fprintf(stderr, "failed to read: %s: %s\n", blockname, big_file_get_error_message());
             exit(1);
         }
         if(0 != big_block_read_simple(&mbb, offset, chunksize, &marray, "f4")) {
-            fprintf(stderr, "failed to read: %s\n", mblockname, big_file_get_error_message());
+            fprintf(stderr, "failed to read: %s: %s\n", mblockname, big_file_get_error_message());
             exit(1);
         }
 
         ptrdiff_t i;
         double * pos = array.data;
-        double * mass = marray.data;
+        float * mass = marray.data;
 #pragma omp parallel for 
         for(i = 0; i < array.dims[0]; i ++) {
             cic_add_particle(cic, &pos[3 * i], mass[i]);

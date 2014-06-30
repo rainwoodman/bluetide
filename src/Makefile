@@ -1,9 +1,8 @@
 all: \
     snapshot-cic
 	$(NULL)
-LIBBIGFILE=$(HOME)/bigfile/src/bigfile.a \
-        $(HOME)/bigfile/src/bigfile-mpi.a
-INCBIGFILE=$(HOME)/bigfile/src
 
-snapshot-cic: snapshot-cic.c  cic.c
+INCBIGFILE=../bigfile/src
+
+snapshot-cic: snapshot-cic.c cic.c ../bigfile/src/bigfile-mpi.c ../bigfile/src/bigfile.c
 	$(CC) -o $@ $^ $(LIBBIGFILE) -I$(INCBIGFILE)
