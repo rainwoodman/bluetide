@@ -14,7 +14,7 @@ void cic_init(CIC * cic, int Ngrid, double BoxSize) {
     cic->Ngrid = Ngrid;
     cic->BoxSize = BoxSize;
     cic->CellSize = BoxSize / Ngrid;
-    cic->buffer = malloc(sizeof(double) * last);
+    cic->buffer = calloc(last, sizeof(double));
     cic->size = last;
 }
 
