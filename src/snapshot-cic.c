@@ -10,6 +10,9 @@
 #include "cic.h"
 int ThisTask;
 int NTask;
+int Ngrid[3];
+double Offset[3] = {0}
+double Size[3] = {-1., -1., -1.};
 
 static void cicadd(CIC * cic, CIC * vcic, BigFile * bf, 
         char * blockname, char * mblockname, char * vblockname) {
@@ -63,6 +66,10 @@ static void cicadd(CIC * cic, CIC * vcic, BigFile * bf,
         float * value = varray.data;
 #pragma omp parallel for 
         for(i = 0; i < array.dims[0]; i ++) {
+            int d;
+            for(d = 0; d < 3; d +) {
+                pos[3 * i + d] -= Offset[d];
+            }
             cic_add_particle(cic, &pos[3 * i], mass[i]);
             if(vcic != NULL) {
                 cic_add_particle(vcic, &pos[3 * i], mass[i] * value[i]);
@@ -83,30 +90,29 @@ static void cicadd(CIC * cic, CIC * vcic, BigFile * bf,
     }   
 }
 void cicreduce(CIC * cic, CIC * result) {
-    MPI_Reduce(cic->buffer, result->buffer, 
-        cic->Ngrid * cic->Ngrid * cic->Ngrid, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(cic->buffer, result->buffer, cic->size, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 }
 
-void dogas(BigFile * bf, char * Field, int Ngrid, double BoxSize, char * filename) {
+void dogas(BigFile * bf, char * Field, char * filename) {
     CIC cic = {0};
     CIC vcic = {0};
     CIC cicreduced = {0};
 
-    cic_init(&cic, Ngrid, BoxSize);
-    cic_init(&vcic, Ngrid, BoxSize);
-    cic_init(&cicreduced, Ngrid, BoxSize);
+    cic_init(&cic, Ngrid, Size, 0);
+    cic_init(&vcic, Ngrid, Size, 0);
+    cic_init(&cicreduced, Ngrid, Size, 0);
     char * vblock = alloca(strlen(Field) + 100);
     sprintf(vblock, "0/%s", Field);
     cicadd(&cic, &vcic, bf, "0/Position", "0/Mass", vblock);
     cicreduce(&cic, &cicreduced);
-    memcpy(cic.buffer, cicreduced.buffer, sizeof(double) * Ngrid * Ngrid * Ngrid);
+    memcpy(cic.buffer, cicreduced.buffer, sizeof(double) * cic.size);
     cicreduce(&vcic, &cicreduced);
-    memcpy(vcic.buffer, cicreduced.buffer, sizeof(double) * Ngrid * Ngrid * Ngrid);
+    memcpy(vcic.buffer, cicreduced.buffer, sizeof(double) * cic.size);
     if(ThisTask == 0) {
         fprintf(stderr, "writing\n");
         FILE * fp = fopen(filename, "w");
-        fwrite(cic.buffer, sizeof(double), Ngrid * Ngrid * Ngrid, fp);
-        fwrite(vcic.buffer, sizeof(double), Ngrid * Ngrid * Ngrid, fp);
+        fwrite(cic.buffer, sizeof(double), cic.size, fp);
+        fwrite(vcic.buffer, sizeof(double), cic.size, fp);
         fclose(fp);
     }
     cic_destroy(&vcic);
@@ -114,12 +120,12 @@ void dogas(BigFile * bf, char * Field, int Ngrid, double BoxSize, char * filenam
     cic_destroy(&cicreduced);
 }
 
-void domatter(BigFile * bf, int Ngrid, double BoxSize, char * filename) {
+void domatter(BigFile * bf, char * filename) {
     CIC cic = {0};
     CIC cicreduced = {0};
 
-    cic_init(&cic, Ngrid, BoxSize);
-    cic_init(&cicreduced, Ngrid, BoxSize);
+    cic_init(&cic, Ngrid, Size);
+    cic_init(&cicreduced, Ngrid, Size);
 
     cicadd(&cic, NULL, bf, "0/Position", "0/Mass", NULL);
     MPI_Barrier(MPI_COMM_WORLD);
@@ -153,13 +159,49 @@ void domatter(BigFile * bf, int Ngrid, double BoxSize, char * filename) {
     if(ThisTask == 0) {
         fprintf(stderr, "writing\n");
         FILE * fp = fopen(filename, "w");
-        fwrite(cicreduced.buffer, sizeof(double), Ngrid * Ngrid * Ngrid, fp);
+        fwrite(cicreduced.buffer, sizeof(double), cic.size, fp);
         fclose(fp);
     }
     cic_destroy(&cic);
     cic_destroy(&cicreduced);
 }
 
+void parse_double3(char * str, double * value[3]) {
+    char * brk;
+    int d = 0;
+    for(brk = strtok(str, ","); 
+        brk;
+        brk = strtok(NULL, ",")) {
+        value[d] = atof(brk);
+        d ++;
+    }
+    int last = d - 1;
+    for(; d < 3; d++) {
+        value[d] = value[last];
+    }    
+}
+void parse_int3(char * str, int * value[3]) {
+    char * brk;
+    int d = 0;
+    for(brk = strtok(str, ","); 
+        brk;
+        brk = strtok(NULL, ",")) {
+        value[d] = atoi(brk);
+        d ++;
+    }
+    int last = d - 1;
+    for(; d < 3; d++) {
+        value[d] = value[last];
+    }    
+}
+void usage() {
+    fprintf(stderr, "usage: [-b baryonfield] [-m] [-o offsetx,offsety,offsetz|sizexyz] [-s sizex,sizey,sizez|sizexyz] filename Ngridx,Ngridy,Ngridz|Ngridxyz outputprefix\n");
+    fprintf(stderr, "-b: include a baryon field\n");
+    fprintf(stderr, "-m: do overall mass field\n");
+    fprintf(stderr, "-o: offset of view box\n");
+    fprintf(stderr, "-s: size of view box\n");
+    exit(1);
+}
 int main(int argc, char * argv[]) {
     MPI_Init(&argc, &argv);
 
@@ -169,7 +211,7 @@ int main(int argc, char * argv[]) {
     int opt;
     char * GasField = NULL;
     int DoMatter = 0;
-    while(-1 != (opt = getopt(argc, argv, "b:m"))) {
+    while(-1 != (opt = getopt(argc, argv, "b:mo:s:"))) {
 
         switch(opt) {
             case 'b':
@@ -178,6 +220,10 @@ int main(int argc, char * argv[]) {
             case 'm':
                 DoMatter = 1;
                 break;
+            case 'o':
+                parse_double3(optarg, Offset);
+            case 's':
+                parse_double3(optarg, Size);
             default:
                 exit(1);
         }
@@ -188,7 +234,7 @@ int main(int argc, char * argv[]) {
     BigBlock bb = {0};
     CIC vcic = {0};
     double BoxSize;
-    int Ngrid = atoi(argv[2]); 
+    parse_int3(argv[2], Ngrid); 
     if(0 != big_file_mpi_open(&bf, argv[1], MPI_COMM_WORLD)) {
         fprintf(stderr, "failed to open %s: %s\n", argv[1], big_file_get_error_message()); 
         exit(1);
@@ -203,15 +249,23 @@ int main(int argc, char * argv[]) {
     big_block_mpi_close(&bb, MPI_COMM_WORLD);
     fprintf(stderr, "BoxSize = %g\n", BoxSize);
 
+    int d;
+    for(d = 0; d < 3; d ++) {
+        if(Size[d] < 0) Size[d] = BoxSize;
+    }
+    for(d = 0; d < 3; d ++) {
+        fprintf(stderr, "NGrid[%d] = %d, Size[%d] = %g Offset[%d] = %g\n",
+            d, Ngrid[d], d, Size[d], d, Offset[d]);
+    }
     if(DoMatter) {
         char * buf = alloca(strlen(oprefix) + 100);
         sprintf(buf, "%sMatter.f8", oprefix);
-        domatter(&bf, Ngrid, BoxSize, buf);
+        domatter(&bf, buf);
     }
     if(GasField) {
         char * buf = alloca(strlen(oprefix) + 100);
         sprintf(buf, "%sGas%s.f8", oprefix, GasField);
-        dogas(&bf, GasField, Ngrid, BoxSize, buf);
+        dogas(&bf, GasField, buf);
     }
     big_file_mpi_close(&bf, MPI_COMM_WORLD);
     MPI_Finalize();

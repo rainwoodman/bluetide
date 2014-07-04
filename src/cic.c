@@ -4,16 +4,17 @@
 #include <math.h>
 #include "cic.h"
 
-void cic_init(CIC * cic, int Ngrid, double BoxSize) {
+void cic_init(CIC * cic, int Ngrid[3], double BoxSize[3], int periodic) {
     int k;
     size_t last = 1;
+    cic->periodic = periodic;
     for(k = 0; k < 3; k++) {
         cic->strides[2 - k] = last;
-        last *= Ngrid;
+        last *= Ngrid[2 - k];
+        cic->CellSize[2 - k] = BoxSize[2 - k] / Ngrid[2 - k];
     }
     cic->Ngrid = Ngrid;
     cic->BoxSize = BoxSize;
-    cic->CellSize = BoxSize / Ngrid;
     cic->buffer = calloc(last, sizeof(double));
     cic->size = last;
 }
@@ -24,9 +25,14 @@ void cic_add_particle(CIC * cic, double Pos[3], double mass) {
     int iCell[3];
     double Res[3];
     for(k = 0; k < 3; k++) {
-        double tmp = Pos[k] / cic->CellSize;
-        while(tmp < 0) tmp += cic->Ngrid;
-        while(tmp  >= cic->Ngrid) tmp -= cic->Ngrid;
+        double tmp = floor(Pos[k] / cic->CellSize[k]);
+        if(cic->periodic) {
+            while(tmp < 0) tmp += cic->Ngrid[k];
+            while(tmp >= cic->Ngrid[k]) tmp -= cic->Ngrid[k];
+        } else {
+            if(tmp < 0) return;
+            if(tmp >= cic->Ngrid[k]) return;
+        }
         iCell[k] = tmp;
         Res[k] = tmp - iCell[k];
     }
@@ -39,7 +45,13 @@ void cic_add_particle(CIC * cic, double Pos[3], double mass) {
         for(k = 0; k < 3; k++) {
             int offset = (connection >> k) & 1;
             int tmp = iCell[k] + offset;
-            if(tmp >= cic->Ngrid) tmp -= cic->Ngrid;
+            if(tmp >= cic->Ngrid[k]) {
+                if(cic->periodic) {
+                    tmp -= cic->Ngrid[k];
+                } else {
+                    goto outofbounds;
+                }
+            }
             linear += tmp * cic->strides[k];
             weight *= offset?
                 /* offset == 1*/ (Res[k])    :
@@ -52,6 +64,7 @@ void cic_add_particle(CIC * cic, double Pos[3], double mass) {
     if(fabs(wtsum - 1.0) > 1e-6) {
         abort(); 
     }
+outofbounds:
 }
 void cic_destroy(CIC * cic) {
     free(cic->buffer);
