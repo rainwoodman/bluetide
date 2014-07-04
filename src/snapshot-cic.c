@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <mpi.h>
-
+#include <math.h>
 #include <unistd.h>
 
 #include <bigfile-mpi.h>
@@ -10,9 +10,10 @@
 #include "cic.h"
 int ThisTask;
 int NTask;
-int Ngrid[3];
-double Offset[3] = {0}
-double Size[3] = {-1., -1., -1.};
+int ViewSize[3];
+double Offset[3] = {0};
+int Ngrid;
+double BoxSize;
 
 static void cicadd(CIC * cic, CIC * vcic, BigFile * bf, 
         char * blockname, char * mblockname, char * vblockname) {
@@ -67,7 +68,7 @@ static void cicadd(CIC * cic, CIC * vcic, BigFile * bf,
 #pragma omp parallel for 
         for(i = 0; i < array.dims[0]; i ++) {
             int d;
-            for(d = 0; d < 3; d +) {
+            for(d = 0; d < 3; d ++) {
                 pos[3 * i + d] -= Offset[d];
             }
             cic_add_particle(cic, &pos[3 * i], mass[i]);
@@ -98,9 +99,9 @@ void dogas(BigFile * bf, char * Field, char * filename) {
     CIC vcic = {0};
     CIC cicreduced = {0};
 
-    cic_init(&cic, Ngrid, Size, 0);
-    cic_init(&vcic, Ngrid, Size, 0);
-    cic_init(&cicreduced, Ngrid, Size, 0);
+    cic_init(&cic, BoxSize, Ngrid, ViewSize);
+    cic_init(&vcic, BoxSize, Ngrid, ViewSize);
+    cic_init(&cicreduced, BoxSize, Ngrid, ViewSize);
     char * vblock = alloca(strlen(Field) + 100);
     sprintf(vblock, "0/%s", Field);
     cicadd(&cic, &vcic, bf, "0/Position", "0/Mass", vblock);
@@ -124,8 +125,8 @@ void domatter(BigFile * bf, char * filename) {
     CIC cic = {0};
     CIC cicreduced = {0};
 
-    cic_init(&cic, Ngrid, Size);
-    cic_init(&cicreduced, Ngrid, Size);
+    cic_init(&cic, BoxSize, Ngrid, ViewSize);
+    cic_init(&cicreduced, BoxSize, Ngrid, ViewSize);
 
     cicadd(&cic, NULL, bf, "0/Position", "0/Mass", NULL);
     MPI_Barrier(MPI_COMM_WORLD);
@@ -166,7 +167,7 @@ void domatter(BigFile * bf, char * filename) {
     cic_destroy(&cicreduced);
 }
 
-void parse_double3(char * str, double * value[3]) {
+void parse_double3(char * str, double value[3]) {
     char * brk;
     int d = 0;
     for(brk = strtok(str, ","); 
@@ -180,7 +181,7 @@ void parse_double3(char * str, double * value[3]) {
         value[d] = value[last];
     }    
 }
-void parse_int3(char * str, int * value[3]) {
+void parse_int3(char * str, int value[3]) {
     char * brk;
     int d = 0;
     for(brk = strtok(str, ","); 
@@ -211,6 +212,8 @@ int main(int argc, char * argv[]) {
     int opt;
     char * GasField = NULL;
     int DoMatter = 0;
+    double Size[3] = {-1., -1. , -1.};
+
     while(-1 != (opt = getopt(argc, argv, "b:mo:s:"))) {
 
         switch(opt) {
@@ -222,19 +225,23 @@ int main(int argc, char * argv[]) {
                 break;
             case 'o':
                 parse_double3(optarg, Offset);
+                break;
             case 's':
                 parse_double3(optarg, Size);
+                break;
             default:
-                exit(1);
+                usage();
         }
+    }
+    if(argc - optind != 3) {
+            usage();
     }
     argv += optind - 1;
     char * oprefix = argv[3];
     BigFile bf = {0};
     BigBlock bb = {0};
     CIC vcic = {0};
-    double BoxSize;
-    parse_int3(argv[2], Ngrid); 
+    Ngrid = atoi(argv[2]);
     if(0 != big_file_mpi_open(&bf, argv[1], MPI_COMM_WORLD)) {
         fprintf(stderr, "failed to open %s: %s\n", argv[1], big_file_get_error_message()); 
         exit(1);
@@ -252,10 +259,11 @@ int main(int argc, char * argv[]) {
     int d;
     for(d = 0; d < 3; d ++) {
         if(Size[d] < 0) Size[d] = BoxSize;
+        ViewSize[d] = ceil(Ngrid / BoxSize * Size[d]);
     }
     for(d = 0; d < 3; d ++) {
-        fprintf(stderr, "NGrid[%d] = %d, Size[%d] = %g Offset[%d] = %g\n",
-            d, Ngrid[d], d, Size[d], d, Offset[d]);
+        fprintf(stderr, "Size[%d] = %g ViewSize[%d] = %d Offset[%d] = %g\n",
+             d, Size[d], d, ViewSize[d], d, Offset[d]);
     }
     if(DoMatter) {
         char * buf = alloca(strlen(oprefix) + 100);
