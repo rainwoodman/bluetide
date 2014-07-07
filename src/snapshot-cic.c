@@ -196,11 +196,12 @@ void parse_int3(char * str, int value[3]) {
     }    
 }
 void usage() {
-    fprintf(stderr, "usage: [-b baryonfield] [-m] [-o offsetx,offsety,offsetz|sizexyz] [-s sizex,sizey,sizez|sizexyz] filename Ngridx,Ngridy,Ngridz|Ngridxyz outputprefix\n");
+    fprintf(stderr, "usage: [-b baryonfield] [-m] [-o offsetx,offsety,offsetz|offsetxyz] [-s sizex,sizey,sizez|sizexyz] filename Ngrid outputprefix\n");
     fprintf(stderr, "-b: include a baryon field\n");
     fprintf(stderr, "-m: do overall mass field\n");
-    fprintf(stderr, "-o: offset of view box\n");
-    fprintf(stderr, "-s: size of view box\n");
+    fprintf(stderr, "-o: offset of view box; code units\n");
+    fprintf(stderr, "-s: size of view box; code units\n");
+    fprintf(stderr, "Ngrid: number of grids of the full box (resolution is BoxSize / Ngrid, final filesize depend on the viewbox size (-s)) \n");
     exit(1);
 }
 int main(int argc, char * argv[]) {
